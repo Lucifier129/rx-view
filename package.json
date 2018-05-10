@@ -5,8 +5,9 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "babel src --out-dir lib",
+    "prebuild": "rimraf ./lib",
     "example:dev": "webpack --watch --env.development",
-    "example:build": "webpack --env.production",
+    "example:prod": "webpack --env.production",
     "test": "jest"
   },
   "keywords": [],
@@ -29,6 +30,7 @@
     "react-dom": "^16.3.1",
     "redux": "^3.7.2",
     "regenerator-runtime": "^0.11.1",
+    "rimraf": "^2.6.2",
     "webpack": "^4.4.1",
     "webpack-cli": "^2.0.13",
     "wobble": "^1.5.0"

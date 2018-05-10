@@ -24,7 +24,8 @@ import {
 	tap,
 	refCount,
 	observeOn,
-	debounceTime
+  debounceTime,
+  filter,
 } from 'rxjs/operators'
 import React from 'react'
 import ReactDOM from 'react-dom'
@@ -61,8 +62,7 @@ export default { create }
 
 export const renderTo = container => source => {
 	container = typeof container === 'string' ? document.querySelector(container) : container
-	let view$ = source.pipe(debounceTime(1000 / 60), observeOn(animationFrameScheduler))
-	return view$.subscribe(view => {
+	return source.pipe(debounceTime(0)).subscribe(view => {
 		ReactDOM.render(view, container)
 	})
 }
@@ -77,10 +77,19 @@ const createAction = (actionTypeList, emitter) => {
 export const createStore = (reducers, preloadState) => {
 	let emitter = new EventEmitter()
 	let actionTypeList = Object.keys(reducers)
-	let reducers$ = actionTypeList.map(key => fromEvent(emitter, key).pipe(map(reducers[key])))
+	let reducers$ = actionTypeList.map(key =>
+		fromEvent(emitter, key).pipe(
+			switchMap(value => {
+				let result = reducers[key](value)
+				return result && isObservable(result) ? result : of(result)
+			})
+		)
+	)
 	let state$ = merge(...reducers$).pipe(
-		startWith(identity),
-		scan((state, reducer) => reducer(state), preloadState),
+		scan(([state], reducer) => [reducer(state), state], [preloadState]),
+		filter(([current, previous]) => current !== previous),
+		map(([current]) => current),
+		startWith(preloadState),
 		publishReplay(1),
 		refCount()
 	)
