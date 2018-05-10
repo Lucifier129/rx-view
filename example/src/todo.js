@@ -130,6 +130,33 @@ export const createStore = (reducers, preloadState) => {
 	}
 }
 
+function shallowEqual(objA, objB) {
+	if (objA === objB) {
+		return true
+	}
+
+	if (typeof objA !== 'object' || objA === null || typeof objB !== 'object' || objB === null) {
+		return false
+	}
+
+	var keysA = Object.keys(objA)
+	var keysB = Object.keys(objB)
+
+	if (keysA.length !== keysB.length) {
+		return false
+	}
+
+	// Test for A's keys different from B.
+	for (var i = 0; i < keysA.length; i++) {
+		if (keysA[i] === 'children') continue
+		if (!objB.hasOwnProperty(keysA[i]) || objA[keysA[i]] !== objB[keysA[i]]) {
+			return false
+		}
+	}
+
+	return true
+}
+
 export const toComponent = render => source => source.pipe(switchMap(render), map(value => () => value))
 
 class Component {
@@ -138,6 +165,7 @@ class Component {
 	}
 }
 
+const EMTPRY = {}
 export const component = render => {
 	render.isComponent = true
 	return render
@@ -180,7 +208,7 @@ const withPrevious = preloadValue => source =>
 	source.pipe(scan(([previous], current) => [current, previous], [preloadValue]))
 
 const isEqual = (a, b) => a === b
-const immutable = (test = isEqual) => source =>
+const immutable = (test = shallowEqual) => source =>
 	source.pipe(
 		withPrevious(),
 		filter(([current, previous]) => !test(current, previous)),
@@ -214,7 +242,7 @@ let handleRemoveTodo = todo => () => todoStore.action.remove(todo.$id)
 let handleAddTodo =
 	text$
 	|> toHandler(text => {
-		if (text.length === 0) return 
+		if (text.length === 0) return
 		todoStore.action.add({ text, completed: false })
 		textStore.action.replace('')
 	})
@@ -223,14 +251,12 @@ let TodoList = component(({ todoList$, onUpdate, onRemove }) => (
 	<div>
 		{todoList$
 			|> render(list => {
-				return list.map((todo, index) => (
-					<TodoItem key={todo.$id} index={index} todo={todo} onUpdate={onUpdate} onRemove={onRemove} />
-				))
+				return list.map(todo => <TodoItem key={todo.$id} todo={todo} onUpdate={onUpdate} onRemove={onRemove} />)
 			})}
 	</div>
 ))
 
-let TodoItem = component(({ todo, index, onUpdate, onRemove }) => {
+let TodoItem = component(({ todo, onUpdate, onRemove }) => {
 	let subject = new Subject()
 	let style = {
 		width: vw$ |> multiply(0.5),
