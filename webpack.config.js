@@ -7,7 +7,8 @@ module.exports = (env, argv) => {
 		entry: {
 			ball: './example/src/ball',
 			react: './example/src/react',
-			todo: './example/src/todo'
+			todo: './example/src/todo',
+			'todo-01': './example/src/todo-01'
 		},
 		output: {
 			filename: '[name].js',
