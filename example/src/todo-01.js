@@ -1,149 +1,61 @@
-/** @jsx h */
-import { h, RxComponent, renderTo, createStore } from 'rx-view'
-import {
-  Observable,
-  merge,
-  concat,
-  combineLatest,
-  Subject,
-  interval,
-  fromEvent,
-  of,
-  pipe,
-  from,
-  isObservable,
-  identity,
-  noop,
-  animationFrameScheduler
-} from 'rxjs'
-import {
-  scan,
-  map,
-  mapTo,
-  startWith,
-  concatMap,
-  share,
-  take,
-  switchMap,
-  publishReplay,
-  tap,
-  refCount,
-  observeOn,
-  debounceTime,
-  filter,
-  sample,
-  distinctUntilChanged,
-  toArray
-} from 'rxjs/operators'
+import React from 'react'
+import ReactDOM from 'react-dom'
+import toRxComponent from 'rx-view/react/toRxComponent'
+import { interval, Subject, merge } from 'rxjs'
+import { startWith, mapTo, scan, publishReplay, refCount, share } from 'rxjs/operators'
 
-class Count extends RxComponent {
-  // model/state
-  incre$ = new Subject()
-  decre$ = new Subject()
-  count$ = merge(this.incre$ |> mapTo(1), this.decre$ |> mapTo(-1))
-  |> startWith(this.props.count)
-  |> scan((sum, n) => sum + n, 0)
+const timer$ = interval(10) |> startWith(0) |> publishReplay(1) |> refCount()
 
-  // controller/command
+class App extends React.Component {
+  static defaultProps = {
+    step: 1
+  }
+
+  constructor(props) {
+    super(props)
+    console.log('constructor')
+  }
+
+  command = {
+    incre: new Subject(),
+    decre: new Subject()
+  }
+
+  count$ = merge(
+    this.command.incre |> mapTo(this.props.step),
+    this.command.decre |> mapTo(-this.props.step)
+  )
+  |> startWith(0)
+  |> scan((sum, n) => sum - n, 0)
+
   handleIncre = () => {
-    this.incre$.next()
+    this.command.incre.next()
   }
   handleDecre = () => {
-    this.decre$.next()
+    this.command.decre.next()
   }
 
-  // view
-  view = (
-    <div>
-      <div>{this.count$}</div>
-      <button onClick={this.handleIncre}>+1</button>
-      <button onClick={this.handleDecre}>-1</button>
-    </div>
-  )
-}
-
-let Footer = ({ active$, completed$ }) => {
-  return (
-    <div>
-      <span>left count: {active$}</span>
-      <span>completed count: {completed$}</span>
-    </div>
-  )
-}
-
-class TodoList extends RxComponent {
-  view = (
-    <div>
-      {this.props.list.map(todo => <TodoItem {...todo} key={todo.text} />)}
-      <button onClick={handleAdd}>++++</button>
-    </div>
-  )
-}
-
-class TodoItem extends RxComponent {
-  view = (
-    <div>
-      {this.props.text} timer {interval(10)}
-    </div>
-  )
-}
-
-let todoList$ = new Subject()
-
-let count = 0
-let list = []
-let handleAdd = () => {
-  list = list.concat({ text: count++ })
-  if (list.length % 3 === 0) {
-    list.sort(i => Math.random() - 0.5)
+  componentWillUnmount() {
+    console.log('unmount')
   }
-  todoList$.next(list)
+
+  render() {
+    console.log('render')
+    return (
+      <div className="test">
+        <h1>header: {timer$}</h1>
+        <button onClick={this.handleIncre}>+1</button>
+        <div>Count: {this.count$}</div>
+        <button onClick={this.handleDecre}>-1</button>
+      </div>
+    )
+  }
 }
 
-let loading = <div>loading...</div>
+let App$ = toRxComponent(App)
 
-let app = (
-  <div>
-    <Count count={10} />
-    <TodoList list={todoList$ |> startWith([])} />
-    <Footer active$={interval(1000)} completed$={interval(2000)} />
-  </div>
-)
+ReactDOM.render(<App$ step={2} />, document.getElementById('root'))
 
-class TodoApp extends RxComponent {
-  subjects = {
-    text: new Subject(),
-    add: new Subject(),
-    remove: new Subject(),
-    toggle: new Subject(),
-    toggleAll: new Subject()
-  }
-  reducers = {
-    add: 2
-  }
-  text$ = this.command.text
-  todos$ = merge(
-    this.command.text |> sample(this.command.add) |> map(text => state => state)
-  )
-  view = (
-    <div>
-      <TodoInput text$={this.text$} />
-    </div>
-  )
-}
-
-class TodoInput extends RxComponent {
-  text$ = new Subject()
-  handleChange = ({ currentTarget }) => {
-    this.text$.next(currentTarget.value)
-  }
-  view = (
-    <div>
-      <input type="text" value={this.text$} onChange={this.handleChange} />
-    </div>
-  )
-}
-
-let appWithLoading = merge(loading, app)
-
-appWithLoading |> renderTo('#root')
+setTimeout(() => {
+  ReactDOM.render(<App$ step={5} />, document.getElementById('root'))
+}, 3000)
