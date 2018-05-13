@@ -1,19 +1,23 @@
 import React from 'react'
 import ReactDOM from 'react-dom'
-import toRxComponent from 'rx-view/react/toRxComponent'
-import { interval, Subject, merge } from 'rxjs'
-import { startWith, mapTo, scan, publishReplay, refCount, share } from 'rxjs/operators'
+import reactive from 'rx-view/react/reactive'
+import { interval, Subject, merge, of } from 'rxjs'
+import {
+  startWith,
+  mapTo,
+  map,
+  scan,
+  publishReplay,
+  refCount,
+  debounceTime
+} from 'rxjs/operators'
 
 const timer$ = interval(10) |> startWith(0) |> publishReplay(1) |> refCount()
 
-class App extends React.Component {
+@reactive()
+class App$ extends React.Component {
   static defaultProps = {
     step: 1
-  }
-
-  constructor(props) {
-    super(props)
-    console.log('constructor')
   }
 
   command = {
@@ -22,11 +26,13 @@ class App extends React.Component {
   }
 
   count$ = merge(
-    this.command.incre |> mapTo(this.props.step),
-    this.command.decre |> mapTo(-this.props.step)
+    this.command.incre |> map(() => this.props.step),
+    this.command.decre |> map(() => -this.props.step)
   )
   |> startWith(0)
   |> scan((sum, n) => sum - n, 0)
+  |> publishReplay(1)
+  |> refCount()
 
   handleIncre = () => {
     this.command.incre.next()
@@ -35,27 +41,16 @@ class App extends React.Component {
     this.command.decre.next()
   }
 
-  componentWillUnmount() {
-    console.log('unmount')
-  }
-
   render() {
-    console.log('render')
     return (
       <div className="test">
         <h1>header: {timer$}</h1>
         <button onClick={this.handleIncre}>+1</button>
-        <div>Count: {this.count$}</div>
+        <span>{this.count$}</span>
         <button onClick={this.handleDecre}>-1</button>
       </div>
     )
   }
 }
 
-let App$ = toRxComponent(App)
-
 ReactDOM.render(<App$ step={2} />, document.getElementById('root'))
-
-setTimeout(() => {
-  ReactDOM.render(<App$ step={5} />, document.getElementById('root'))
-}, 3000)
