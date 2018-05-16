@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom'
-import { reactive } from 'rx-view'
+import { reactive, toReactiveComponent, toReactComponent } from 'rx-view'
 import {
   Observable,
   interval,
@@ -8,7 +8,8 @@ import {
   ReplaySubject,
   merge,
   of,
-  fromEvent
+  fromEvent,
+  range
 } from 'rxjs'
 import {
   startWith,
@@ -21,7 +22,8 @@ import {
   debounceTime,
   tap,
   catchError,
-  sample
+  sample,
+  delay
 } from 'rxjs/operators'
 import { Spring } from 'wobble'
 import EventEmitter from 'events'
@@ -38,7 +40,11 @@ const createToggler = status => {
     merge(show$, hide$)
     |> startWith({ options: status ? options.show : options.hide })
     |> switchMap(
-      data => spring(data.options) |> tap({ complete: data.handler })
+      data =>
+        spring(data.options)
+        |> tap({ complete: data.handler })
+        |> map(Math.abs)
+        |> map(value => (value < 1 ? value : 2 - value))
     )
     |> publishReplay(1)
     |> refCount()
@@ -147,11 +153,31 @@ class TodoApp extends React.PureComponent {
   }
 }
 
+const Timer$ =
+  interval(100)
+  |> map(count => ({ count }))
+  |> toReactComponent(props => props.count)
+
 const toPercent = x => x * 100 + '%'
+const show$ = spring({ fromValue: 0, toValue: 1 })
+const hide$ = spring({ fromValue: 1, toValue: 0 })
+const Slider$ = reactive(({ status }) => {
+  let spring$ = status ? show$ : hide$
+  let width$ =
+    spring$
+    |> map(Math.abs)
+    |> map(value => (value < 1 ? value : 2 - value))
+    |> map(toPercent)
+  let style = {
+    width: width$,
+    height: 3,
+    backgroundColor: 'green'
+  }
+  return <div style={style} />
+})
 
 @reactive
 class TodoItem$ extends React.PureComponent {
-  timer$ = interval(10) |> publishReplay(1) |> refCount()
   toggler = createToggler(true)
   handleRemove = () => {
     let remove = value => this.props.onRemove(this.props.id)
@@ -163,25 +189,21 @@ class TodoItem$ extends React.PureComponent {
   render() {
     let { props, state } = this
     let style = {
-      position: 'relative',
       height: this.toggler.state$ |> map(value => value * 40),
       opacity: this.toggler.state$,
       backgroundColor: '#eaeaea',
-      marginTop: 1,
+      marginBottom: 3,
       lineHeight: '40px'
     }
     return (
-      <div data-id={props.id} style={style}>
-        <div style={{ position: 'relative' }}>
-          {props.text}{' '}
-          <button onClick={this.handleToggle} data-id={this.props.id}>
-            {props.completed ? 'completed' : 'active'}
-          </button>{' '}
-          <button onClick={this.handleRemove} data-id={this.props.id}>
-            delete
-          </button>
-          {this.timer$}
-        </div>
+      <div style={style}>
+        {props.text}{' '}
+        <button onClick={this.handleToggle}>
+          {props.completed ? 'completed' : 'active'}
+        </button>{' '}
+        <button onClick={this.handleRemove}>delete</button>
+        <Timer$ />
+        <Slider$ status={props.completed} />
       </div>
     )
   }
