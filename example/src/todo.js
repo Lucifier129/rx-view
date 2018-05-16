@@ -1,404 +1,190 @@
-/** @jsx View.create */
-import {
-  Observable,
-  merge,
-  concat,
-  combineLatest,
-  Subject,
-  interval,
-  fromEvent,
-  of,
-  pipe,
-  from,
-  isObservable,
-  identity,
-  noop,
-  animationFrameScheduler
-} from 'rxjs'
-import {
-  scan,
-  map,
-  startWith,
-  concatMap,
-  share,
-  take,
-  switchMap,
-  publishReplay,
-  tap,
-  refCount,
-  observeOn,
-  debounceTime,
-  filter,
-  distinctUntilChanged
-} from 'rxjs/operators'
 import React from 'react'
 import ReactDOM from 'react-dom'
-import EventEmitter from 'events'
+import { reactive } from 'rx-view'
+import {
+  Observable,
+  interval,
+  Subject,
+  ReplaySubject,
+  merge,
+  of,
+  fromEvent
+} from 'rxjs'
+import {
+  startWith,
+  switchMap,
+  mapTo,
+  map,
+  scan,
+  publishReplay,
+  refCount,
+  debounceTime,
+  tap,
+  catchError,
+  sample
+} from 'rxjs/operators'
 import { Spring } from 'wobble'
+import EventEmitter from 'events'
+
+const createToggler = status => {
+  let options = {
+    show: { fromValue: 0, toValue: 1 },
+    hide: { fromValue: 1, toValue: 0 }
+  }
+  let emitter = new EventEmitter()
+  let show$ = fromEvent(emitter, 'show')
+  let hide$ = fromEvent(emitter, 'hide')
+  let state$ =
+    merge(show$, hide$)
+    |> startWith({ options: status ? options.show : options.hide })
+    |> switchMap(
+      data => spring(data.options) |> tap({ complete: data.handler })
+    )
+    |> publishReplay(1)
+    |> refCount()
+  let show = callback => {
+    emitter.emit('show', {
+      options: options.show,
+      handler: callback
+    })
+  }
+  let hide = callback => {
+    emitter.emit('hide', {
+      options: options.hide,
+      handler: callback
+    })
+  }
+  return {
+    state$,
+    show,
+    hide
+  }
+}
 
 const springOptions = {
   fromValue: 1,
   toValue: 0,
-  stiffness: 1000,
   damping: 20,
   mass: 3
 }
 
-const spring = options =>
-  Observable.create(observer => {
+const spring = options => {
+  return Observable.create(observer => {
     let instance = new Spring({ ...springOptions, ...options })
     instance.start()
-    instance.onUpdate(data => observer.next(data.currentValue))
-    instance.onStop(() => observer.complete())
+    instance.onUpdate(data => {
+      observer.next(data.currentValue)
+    })
+    instance.onStop(() => {
+      observer.complete()
+    })
     return () => instance.stop()
   })
-
-const spring$ = spring()
-
-const fromArrayShape = array => {
-  if (!array.length) return of(array)
-  return combineLatest(...array.map(fromShape))
-}
-const fromObjectShape = obj => {
-  let keys = Object.keys(obj)
-  if (!keys.length) return of(obj)
-  let sourceList = keys.map(key => fromShape(obj[key]))
-  let construct = (result, value, index) => {
-    result[keys[index]] = value
-    return result
-  }
-  let toShape = valueList => valueList.reduce(construct, {})
-  return combineLatest(...sourceList).pipe(map(toShape))
 }
 
-const fromShape = shape => {
-  if (shape && isObservable(shape)) {
-    return shape
-  } else if (Array.isArray(shape)) {
-    return fromArrayShape(shape)
-  } else if (shape !== null && typeof shape === 'object') {
-    return fromObjectShape(shape)
+class TodoApp extends React.PureComponent {
+  state = {
+    text: '',
+    todos: []
   }
-  return of(shape)
-}
-
-export const create = (type, props, ...children) => {
-  if (type && type.isComponent) {
-    return of({ ...props, children }) |> switchMap(type)
-  } else {
-    return (
-      fromShape([type, props, ...children])
-      |> map(args => React.createElement(...args))
-    )
+  uid = 0
+  handleChange = event => {
+    this.setState({
+      text: event.target.value
+    })
   }
-  return null
-}
-
-const View = { create }
-
-export const renderTo = container => source => {
-  container =
-    typeof container === 'string'
-      ? document.querySelector(container)
-      : container
-  return source.pipe(debounceTime(0)).subscribe(view => {
-    ReactDOM.render(view, container)
-  })
-}
-
-const createAction = (actionTypeList, emitter) => {
-  return actionTypeList.reduce((result, key) => {
-    result[key] = payload => emitter.emit(key, payload)
-    return result
-  }, {})
-}
-
-export const createStore = (reducers, preloadState) => {
-  let emitter = new EventEmitter()
-  let actionTypeList = Object.keys(reducers)
-  let reducers$ = actionTypeList.map(key =>
-    fromEvent(emitter, key).pipe(
-      switchMap(value => {
-        let result = reducers[key](value)
-        return result && isObservable(result) ? result : of(result)
-      })
-    )
-  )
-  let state$ = merge(...reducers$).pipe(
-    scan(([state], reducer) => [reducer(state), state], [preloadState]),
-    filter(([current, previous]) => current !== previous),
-    map(([current]) => current),
-    startWith(preloadState),
-    publishReplay(1),
-    refCount()
-  )
-  return {
-    state$: state$,
-    action: createAction(actionTypeList, emitter)
-  }
-}
-
-function shallowEqual(objA, objB) {
-  if (objA === objB) {
-    return true
-  }
-
-  if (
-    typeof objA !== 'object' ||
-    objA === null ||
-    typeof objB !== 'object' ||
-    objB === null
-  ) {
-    return false
-  }
-
-  var keysA = Object.keys(objA)
-  var keysB = Object.keys(objB)
-
-  if (keysA.length !== keysB.length) {
-    return false
-  }
-
-  // Test for A's keys different from B.
-  for (var i = 0; i < keysA.length; i++) {
-    if (keysA[i] === 'children') continue
-    if (!objB.hasOwnProperty(keysA[i]) || objA[keysA[i]] !== objB[keysA[i]]) {
-      return false
+  handleAdd = () => {
+    if (!this.state.text) return
+    let todo = {
+      id: this.uid++,
+      completed: false,
+      text: this.state.text
     }
+    let todos = this.state.todos.concat(todo)
+    this.setState({ todos, text: '' })
   }
-
-  return true
-}
-
-export const toComponent = render => source =>
-  source.pipe(switchMap(render), map(value => () => value))
-
-class Component {
-  constructor(render) {
-    this.render = render
+  handleRemove = id => {
+    let todos = this.state.todos.filter(todo => todo.id !== id)
+    this.setState({ todos })
   }
-}
-
-const EMTPRY = {}
-export const component = render => {
-  render.isComponent = true
-  return render
-}
-
-export const render = factory => source =>
-  source.pipe(
-    switchMap(data => {
-      return fromShape(factory(data))
-    })
-  )
-
-export const split = f => source => {
-  let cache = [[], [], []]
-  return source.pipe(
-    switchMap(list => {
-      let list$ = list.map(item => {
-        let index = cache[0].indexOf(item)
-        if (index !== -1) {
-          return cache[1][index]
-        }
-        let value$ = fromShape(f(item)) |> publishReplay(1) |> refCount()
-        cache[0].push(item)
-        cache[1].push(value$)
-        cache[2].push(value$.subscribe(noop))
-        return value$
-      })
-      return fromShape(list$)
-    })
-  )
-}
-
-export const runOnce = (f = noop) => source => source.pipe(take(1)).subscribe(f)
-export const toHandler = (f = noop) => source => {
-  let data$ = source.pipe(take(1))
-  return (...args) => data$.subscribe(value => f(value, ...args))
-}
-
-const createListStore = (preloadState = []) => {
-  let uid = 0
-  let reducers = {
-    add: data => state => state.concat({ $id: uid++, ...data }),
-    remove: id => state => state.filter(item => item.$id !== id),
-    update: ({ id, ...data }) => state =>
-      state.map(item => (item.$id !== id ? item : { ...item, ...data })),
-    map: fn => state => state.map(fn),
-    filter: fn => state => state.filter(fn)
+  handleToggle = id => {
+    let todos = this.state.todos.map(
+      todo => (todo.id !== id ? todo : { ...todo, completed: !todo.completed })
+    )
+    this.setState({ todos })
   }
-  return createStore(reducers, preloadState)
-}
-
-const createSingleStore = (selector = identity, preloadState) => {
-  let reducers = {
-    update: value => state => selector(value),
-    replace: value => state => value
+  handleToggleAll = () => {
+    let todos = this.state.todos.map(todo => ({
+      ...todo,
+      completed: !todo.completed
+    }))
+    this.setState({ todos })
   }
-  return createStore(reducers, preloadState)
-}
-
-const withPrevious = preloadValue => source =>
-  source.pipe(
-    scan(([previous], current) => [current, previous], [preloadValue])
-  )
-
-const vsize$ = Observable.create(observer => {
-  let next = () =>
-    observer.next({ vw: window.innerWidth, vh: window.innerHeight })
-  let timer = null
-  let listener = () => {
-    clearTimeout(timer)
-    timer = setTimeout(next, 200)
-  }
-  next()
-  window.addEventListener('resize', listener, false)
-  return () => window.removeEventListener('resize', listener, false)
-}).pipe(distinctUntilChanged(shallowEqual))
-
-let todoStore = createListStore([])
-let textStore = createSingleStore(event => event.target.value, '')
-let todoList$ = todoStore.state$
-let actived$ =
-  todoList$ |> map(list => list.filter(item => !item.completed).length)
-let completed$ =
-  todoList$ |> map(list => list.filter(item => item.completed).length)
-let text$ = textStore.state$
-
-let handleTextChange = textStore.action.update
-let handleUpdateTodo = todo => () =>
-  todoStore.action.update({ id: todo.$id, completed: !todo.completed })
-let handleRemoveTodo = todo => () => todoStore.action.remove(todo.$id)
-let handleAddTodo =
-  text$
-  |> toHandler(text => {
-    if (text.length === 0) return
-    todoStore.action.add({ text, completed: false })
-    textStore.action.replace('')
-  })
-
-let TodoList = component(({ todoList$, onUpdate, onRemove }) => (
-  <div>
-    {todoList$
-      |> split(todo => {
-        console.log('todo', todo)
-        return (
-          <TodoItem
-            key={todo.$id}
-            todo={todo}
-            onUpdate={onUpdate}
-            onRemove={onRemove}
+  render() {
+    return (
+      <div>
+        <h1>Todo App</h1>
+        <header>
+          input:{' '}
+          <input
+            type="text"
+            value={this.state.text}
+            onChange={this.handleChange}
           />
-        )
-      })}
-  </div>
-))
-
-let TodoItem = component(({ todo, onUpdate, onRemove }) => {
-  let subject = new Subject()
-  let style = {
-    width: vw$ |> multiply(0.5),
-    height: merge(of(40) |> springWithPrevious(0), subject),
-    opacity: merge(of(1), subject |> map(value => value / 40)),
-    margin: '0 auto',
-    background: '#eaeaea',
-    marginTop: 1
+          <button onClick={this.handleAdd}>add</button>
+          <button onClick={this.handleToggleAll}>toggleAll</button>
+        </header>
+        {this.state.todos.map(todo => (
+          <TodoItem$
+            key={todo.id}
+            {...todo}
+            onToggle={this.handleToggle}
+            onRemove={this.handleRemove}
+          />
+        ))}
+      </div>
+    )
   }
-  subject.subscribe({ complete: onRemove(todo) })
-  return (
-    <div data-id={todo.$id} style={style}>
-      {todo.text}{' '}
-      <span onClick={onUpdate(todo)}>{todo.completed ? 'ON' : 'OFF'}</span>{' '}
-      <span
-        onClick={() =>
-          spring({
-            fromValue: 40,
-            toValue: 0,
-            stiffness: 1000,
-            damping: 500,
-            mass: 3
-          }).subscribe(subject)
-        }
-      >
-        X
-      </span>
-    </div>
-  )
-})
+}
 
-let vw$ = vsize$ |> map(size => size.vw)
-let vh$ = vsize$ |> map(size => size.vh)
-let multiply = n => source => source |> map(value => value * n)
+const toPercent = x => x * 100 + '%'
 
-let springWithPrevious = value => source =>
-  source.pipe(
-    withPrevious(value),
-    switchMap(([current, previous]) => {
-      if (previous == null) return of(current)
-      return spring({ fromValue: previous, toValue: current })
-    })
-  )
-
-let Div = component(props => {
-  let { width, height, ...rest } = props
-  let width$ =
-    width < 1 ? vw$ |> multiply(width) |> springWithPrevious(0) : width
-  let height$ = height < 1 ? vh$ |> multiply(height) : height
-  let style = { ...props.style, width: width$, height: height$ }
-  return <div {...rest} style={style} />
-})
-
-let TodoInput = component(({ text$, onChange, onAdd }) => {
-  let style = {
-    margin: '0 auto',
-    background: '#eaeaea'
+@reactive
+class TodoItem$ extends React.PureComponent {
+  timer$ = interval(10) |> publishReplay(1) |> refCount()
+  toggler = createToggler(true)
+  handleRemove = () => {
+    let remove = value => this.props.onRemove(this.props.id)
+    this.toggler.hide(remove)
   }
-  return (
-    <Div width={0.5} height={40} style={style}>
-      text input: <input type="input" value={text$} onChange={onChange} />
-      <button onClick={onAdd}>添加</button>
-    </Div>
-  )
-})
+  handleToggle = () => {
+    this.props.onToggle(this.props.id)
+  }
+  render() {
+    let { props, state } = this
+    let style = {
+      position: 'relative',
+      height: this.toggler.state$ |> map(value => value * 40),
+      opacity: this.toggler.state$,
+      backgroundColor: '#eaeaea',
+      marginTop: 1,
+      lineHeight: '40px'
+    }
+    return (
+      <div data-id={props.id} style={style}>
+        <div style={{ position: 'relative' }}>
+          {props.text}{' '}
+          <button onClick={this.handleToggle} data-id={this.props.id}>
+            {props.completed ? 'completed' : 'active'}
+          </button>{' '}
+          <button onClick={this.handleRemove} data-id={this.props.id}>
+            delete
+          </button>
+          {this.timer$}
+        </div>
+      </div>
+    )
+  }
+}
 
-let Footer = component(({ actived$, completed$ }) => {
-  return (
-    <div>
-      <span>left count: {actived$}</span>{' '}
-      <span>completed count: {completed$}</span>
-    </div>
-  )
-})
-
-let App = component(({ state, handlers }) => (
-  <div>
-    <TodoInput
-      text$={state.text$}
-      onChange={handlers.handleTextChange}
-      onAdd={handlers.handleAddTodo}
-    />
-    <TodoList
-      todoList$={state.todoList$}
-      onUpdate={handlers.handleUpdateTodo}
-      onRemove={handlers.handleRemoveTodo}
-    />
-    <Footer actived$={state.actived$} completed$={state.completed$} />
-  </div>
-))
-
-console.dir(App)
-
-let app = (
-  <App
-    state={{ text$, todoList$, actived$, completed$ }}
-    handlers={{
-      handleTextChange,
-      handleAddTodo,
-      handleUpdateTodo,
-      handleRemoveTodo
-    }}
-  />
-)
-
-app |> renderTo('#root')
+ReactDOM.render(<TodoApp />, document.getElementById('root'))

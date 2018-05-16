@@ -1,4 +1,4 @@
 import reactive from './reactive'
-import { fromShape } from './shared'
+import { combine } from './shared'
 
-export { reactive, fromShape }
+export { reactive, combine }
